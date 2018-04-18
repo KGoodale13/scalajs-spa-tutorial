@@ -55,8 +55,8 @@ class AuthenticationController @Inject() (
       credentialsProvider.authenticate(Credentials(data.email, data.password)).flatMap { loginInfo =>
         userService.retrieve(loginInfo).flatMap {
           case Some(user) => silhouette.env.authenticatorService.create(loginInfo).flatMap { authenticator =>
-            silhouette.env.authenticatorService.init(authenticator).map { token =>
-              Ok(Json.obj("token" -> token))
+              silhouette.env.authenticatorService.init(authenticator).flatMap { cookie =>
+              silhouette.env.authenticatorService.embed( cookie, Ok("OK") )
             }
           }
           case None => Future.failed(new IdentityNotFoundException("Couldn't find user"))
@@ -97,10 +97,9 @@ class AuthenticationController @Inject() (
             user <- userService.save(user)
             authInfo <- authInfoRepository.add(loginInfo, authInfo)
             authenticator <- silhouette.env.authenticatorService.create(loginInfo)
-            token <- silhouette.env.authenticatorService.init(authenticator)
-          } yield {
-            Ok(Json.obj("token" -> token))
-          }
+            cookie <- silhouette.env.authenticatorService.init(authenticator)
+            result <- silhouette.env.authenticatorService.embed( cookie, Ok("OK") )
+          } yield result
       }
     }.recoverTotal {
       case error =>

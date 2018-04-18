@@ -5,25 +5,27 @@ import javax.inject.Named
 
 import com.google.inject.{AbstractModule, Provides}
 import com.mohiva.play.silhouette.api._
-import com.mohiva.play.silhouette.api.crypto.{Crypter, CrypterAuthenticatorEncoder}
+import com.mohiva.play.silhouette.api.crypto.{Crypter, CrypterAuthenticatorEncoder, Signer}
 import com.mohiva.play.silhouette.api.util._
 import com.mohiva.play.silhouette.api.services.AuthenticatorService
 import com.mohiva.play.silhouette.api.repositories.AuthInfoRepository
-import com.mohiva.play.silhouette.crypto.{JcaCrypter, JcaCrypterSettings}
+import com.mohiva.play.silhouette.crypto.{JcaCrypter, JcaCrypterSettings, JcaSigner, JcaSignerSettings}
 import com.mohiva.play.silhouette.persistence.repositories.DelegableAuthInfoRepository
 import com.mohiva.play.silhouette.impl.authenticators._
-import com.mohiva.play.silhouette.impl.util.{PlayCacheLayer, SecureRandomIDGenerator}
+import com.mohiva.play.silhouette.impl.util.{DefaultFingerprintGenerator, PlayCacheLayer, SecureRandomIDGenerator}
 import com.mohiva.play.silhouette.password.BCryptSha256PasswordHasher
 import com.mohiva.play.silhouette.persistence.daos.{DelegableAuthInfoDAO, InMemoryAuthInfoDAO}
+import net.ceedubs.ficus.Ficus._
+import net.ceedubs.ficus.readers.ArbitraryTypeReader._
 import play.api.Configuration
 import play.api.libs.ws.WSClient
 import utils.auth.DefaultEnv
 import models.daos._
 import models.services._
-import play.api.cache._
+import play.api.mvc.CookieHeaderEncoding
 
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.duration.FiniteDuration
+
 
 
 /**
@@ -41,18 +43,14 @@ class SilhouetteModule extends AbstractModule {
   override def configure() = {
     // Create instances of our dependency injected classes
     bind(classOf[Clock]).toInstance(Clock())
-
     bind(classOf[UserDAO]).to(classOf[UserDAOImpl])
     bind(classOf[UserService]).to(classOf[UserServiceImpl])
-
     bind(classOf[PasswordHasher]).toInstance( new BCryptSha256PasswordHasher() )
-
+    bind(classOf[FingerprintGenerator]).toInstance(new DefaultFingerprintGenerator(false))
     bind(classOf[IDGenerator]).toInstance(new SecureRandomIDGenerator(128))
     bind(classOf[EventBus]).toInstance(EventBus())
-
     bind(classOf[CacheLayer]).to(classOf[PlayCacheLayer])
 
-    //bind(classOf[DelegableAuthInfoDAO[PasswordInfo]]).toInstance(new InMemoryAuthInfoDAO[PasswordInfo]())
   }
 
   /**
@@ -89,7 +87,7 @@ class SilhouetteModule extends AbstractModule {
   @Provides
   def provideEnvironment(
     userService: UserService,
-    authenticatorService: AuthenticatorService[JWTAuthenticator],
+    authenticatorService: AuthenticatorService[CookieAuthenticator],
     eventBus: EventBus): Environment[DefaultEnv] = {
 
     Environment[DefaultEnv](
@@ -102,34 +100,20 @@ class SilhouetteModule extends AbstractModule {
 
 
 
-  /**
-    * Provides the authenticator service.
-    *
-    * @param idGenerator The ID generator implementation.
-    * @param configuration The Play configuration.
-    * @param clock The clock instance.
-    * @return The authenticator service.
-    */
   @Provides
   def provideAuthenticatorService(
-    @Named("authenticator-crypter") crypter: Crypter,
-    idGenerator: IDGenerator,
-    configuration: Configuration,
-    clock: Clock): AuthenticatorService[JWTAuthenticator] = {
+   @Named("authenticator-signer") signer: Signer,
+   @Named("authenticator-crypter") crypter: Crypter,
+   cookieHeaderEncoding: CookieHeaderEncoding,
+   fingerprintGenerator: FingerprintGenerator,
+   idGenerator: IDGenerator,
+   configuration: Configuration,
+   clock: Clock) : AuthenticatorService[CookieAuthenticator] = {
 
+    val config = CookieAuthenticatorSettings("silhouette.authenticator")
+    val authenticatorEncoder = new CrypterAuthenticatorEncoder(crypter)
 
-    val configurationPath = "silhouette.authenticator"
-
-    val config = JWTAuthenticatorSettings(
-      fieldName = configuration.get[String](s"$configurationPath.headerName"),
-      issuerClaim = configuration.get[String](s"$configurationPath.issuerClaim"),
-      authenticatorExpiry = configuration.get[FiniteDuration](s"$configurationPath.authenticatorExpiry"),
-      sharedSecret = configuration.get[String](s"$configurationPath.sharedSecret")
-    )
-
-    val encoder = new CrypterAuthenticatorEncoder(crypter)
-
-    new JWTAuthenticatorService( config, None, encoder, idGenerator, clock)
+    new CookieAuthenticatorService(config, None, signer, cookieHeaderEncoding, authenticatorEncoder, fingerprintGenerator, idGenerator, clock)
   }
 
   /**
@@ -145,10 +129,16 @@ class SilhouetteModule extends AbstractModule {
     new JcaCrypter(JcaCrypterSettings(key))
   }
 
+  // Signer for our cookie authenticator
+    @Provides @Named("authenticator-signer")
+    def provideAuthenticatorSigner(configuration: Configuration): Signer = {
+    val config = configuration.underlying.as[JcaSignerSettings]("silhouette.authenticator.signer")
+    new JcaSigner(config)
+  }
+
   /**
     * Provides the auth info repository.
     *
-    * @param passwordInfoDAO The implementation of the delegable password auth info DAO.
     * @return The auth info repository instance.
     */
   @Provides

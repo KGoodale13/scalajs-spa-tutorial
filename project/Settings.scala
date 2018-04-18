@@ -60,7 +60,8 @@ object Settings {
     "com.mohiva" %% "play-silhouette-password-bcrypt" % versions.silhouette,
     "com.mohiva" %% "play-silhouette-crypto-jca" % versions.silhouette,
     "com.mohiva" %% "play-silhouette-persistence" % versions.silhouette,
-    "com.mohiva" %% "play-silhouette-testkit" % versions.silhouette % Test
+    "com.mohiva" %% "play-silhouette-testkit" % versions.silhouette % Test,
+    "com.iheart" %% "ficus" % "1.4.3"
 
   ))
 
