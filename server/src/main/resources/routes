@@ -12,5 +12,10 @@ GET     /assets/*file                     controllers.Assets.versioned(path="/pu
 # Autowire calls
 POST    /api/*path                        controllers.Application.autowireApi(path: String)
 
+# Authentication routes
+GET         /signOut                      controllers.AuthenticationController.signOut
+POST        /signIn                       controllers.AuthenticationController.signIn
+POST        /signUp                       controllers.AuthenticationController.signUp
+
 # Logging
 POST /logging                             controllers.Application.logging
